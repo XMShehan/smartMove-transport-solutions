@@ -1,4 +1,19 @@
+
 package com.smartmove.backend.api;
+
+import com.smartmove.backend.data.Driver;
+import com.smartmove.backend.data.Manager;
+import com.smartmove.backend.data.Passenger;
+import com.smartmove.backend.data.Route;
+import com.smartmove.backend.data.Technician;
+import com.smartmove.backend.data.Vehicle;
+
+import com.smartmove.backend.service.DriverService;
+import com.smartmove.backend.service.ManagerService;
+import com.smartmove.backend.service.PassengerService;
+import com.smartmove.backend.service.RouteService;
+import com.smartmove.backend.service.TechnicianService;
+import com.smartmove.backend.service.VehicleService;
 
 import java.math.BigDecimal;
 import java.sql.Date;
@@ -21,267 +36,685 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** REST endpoints for the existing SMARTMOVE Oracle schema. */
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = {"http://localhost:5173", "http://127.0.0.1:5173"}, allowCredentials = "true")
+@CrossOrigin(
+        origins = {
+                "http://localhost:5173",
+                "http://127.0.0.1:5173"
+        },
+        allowCredentials = "true"
+)
 public class OracleApiController {
+
     private final JdbcTemplate jdbc;
     private final DataSource dataSource;
 
-    public OracleApiController(JdbcTemplate jdbc, DataSource dataSource) {
+    private final ManagerService managerService;
+    private final VehicleService vehicleService;
+    private final DriverService driverService;
+    private final RouteService routeService;
+    private final PassengerService passengerService;
+    private final TechnicianService technicianService;
+
+    public OracleApiController(
+            JdbcTemplate jdbc,
+            DataSource dataSource,
+            ManagerService managerService,
+            VehicleService vehicleService,
+            DriverService driverService,
+            RouteService routeService,
+            PassengerService passengerService,
+            TechnicianService technicianService) {
+
         this.jdbc = jdbc;
         this.dataSource = dataSource;
+        this.managerService = managerService;
+        this.vehicleService = vehicleService;
+        this.driverService = driverService;
+        this.routeService = routeService;
+        this.passengerService = passengerService;
+        this.technicianService = technicianService;
     }
 
+    // =========================================================
+    // MANAGERS
+    // =========================================================
+
     @GetMapping("/managers")
-    public List<Map<String, Object>> managers() {
-        return jdbc.queryForList("SELECT manager_id AS \"managerId\", name, nic, phone, email FROM manager ORDER BY manager_id");
+    public List<Manager> managers() {
+        return managerService.getAllManagers();
     }
 
     @PostMapping("/managers")
-    public Map<String, Object> createManager(@RequestBody Map<String, Object> b) {
-        Map<String, Object> values = row("name", text(b, "name"), "nic", text(b, "nic"),
-                "phone", optionalText(b, "phone"), "email", text(b, "email"), "password", PasswordHasher.hash(text(b, "password")));
-        return created("managerId", insert("manager", "manager_id", values));
+    public Map<String, Object> createManager(
+            @RequestBody Map<String, Object> b) {
+
+        Manager manager = new Manager(
+                text(b, "name"),
+                text(b, "nic"),
+                optionalText(b, "phone"),
+                text(b, "email"),
+                PasswordHasher.hash(text(b, "password"))
+        );
+
+        Manager saved = managerService.createManager(manager);
+
+        return created("managerId", saved.getManagerId());
     }
 
+    // =========================================================
+    // VEHICLES
+    // =========================================================
+
     @GetMapping("/vehicles")
-    public List<Map<String, Object>> vehicles() {
-        return jdbc.queryForList("SELECT vehicle_id AS \"vehicleId\", manager_id AS \"managerId\", vehicle_type AS \"vehicleType\", registration_no AS \"registrationNo\", manufacture_year AS \"manufactureYear\", seat_capacity AS \"seatCapacity\", status, fuel_type AS \"fuelType\" FROM vehicle ORDER BY vehicle_id");
+    public List<Vehicle> vehicles() {
+        return vehicleService.getAllVehicles();
     }
 
     @PostMapping("/vehicles")
-    public Map<String, Object> createVehicle(@RequestBody Map<String, Object> b) {
-        Map<String, Object> values = row("manager_id", longNumber(b, "managerId"), "vehicle_type", text(b, "vehicleType"),
-                "registration_no", text(b, "registrationNo"), "manufacture_year", optionalInteger(b, "manufactureYear"),
-                "seat_capacity", integer(b, "seatCapacity"), "status", defaultText(b, "status", "ACTIVE"),
-                "fuel_type", optionalText(b, "fuelType"));
-        return created("vehicleId", insert("vehicle", "vehicle_id", values));
+    public Map<String, Object> createVehicle(
+            @RequestBody Map<String, Object> b) {
+
+        Vehicle vehicle = new Vehicle();
+
+        vehicle.setManagerId(longNumber(b, "managerId"));
+        vehicle.setVehicleType(text(b, "vehicleType"));
+        vehicle.setRegistrationNo(text(b, "registrationNo"));
+        vehicle.setManufactureYear(
+                optionalInteger(b, "manufactureYear"));
+        vehicle.setSeatCapacity(integer(b, "seatCapacity"));
+        vehicle.setStatus(defaultText(b, "status", "ACTIVE"));
+        vehicle.setFuelType(optionalText(b, "fuelType"));
+
+        Vehicle saved = vehicleService.createVehicle(vehicle);
+
+        return created("vehicleId", saved.getVehicleId());
     }
 
     @PatchMapping("/vehicles/{id}/status")
-    public Map<String, Object> updateVehicleStatus(@PathVariable long id, @RequestBody Map<String, Object> b) {
-        String status = text(b, "status").toUpperCase();
-        if (!List.of("ACTIVE", "INACTIVE", "MAINTENANCE", "RETIRED").contains(status)) {
-            throw new IllegalArgumentException("status must be ACTIVE, INACTIVE, MAINTENANCE, or RETIRED");
-        }
-        int count = jdbc.update("UPDATE vehicle SET status = ? WHERE vehicle_id = ?", status, id);
-        ensureUpdated(count, "Vehicle");
-        return message("Vehicle status updated", "vehicleId", id);
+    public Map<String, Object> updateVehicleStatus(
+            @PathVariable long id,
+            @RequestBody Map<String, Object> b) {
+
+        Vehicle updated = vehicleService.updateVehicleStatus(
+                id, text(b, "status"));
+
+        return message(
+                "Vehicle status updated",
+                "vehicleId",
+                updated.getVehicleId()
+        );
     }
 
+    // =========================================================
+    // DRIVERS
+    // =========================================================
+
     @GetMapping("/drivers")
-    public List<Map<String, Object>> drivers() {
-        return jdbc.queryForList("SELECT driver_id AS \"driverId\", manager_id AS \"managerId\", name, nic, license_no AS \"licenseNo\", phone, email, hire_date AS \"hireDate\", status FROM driver ORDER BY driver_id");
+    public List<Driver> drivers() {
+        return driverService.getAllDrivers();
     }
 
     @PostMapping("/drivers")
-    public Map<String, Object> createDriver(@RequestBody Map<String, Object> b) {
-        Map<String, Object> values = row("manager_id", longNumber(b, "managerId"), "name", text(b, "name"),
-                "password", PasswordHasher.hash(text(b, "password")), "nic", text(b, "nic"),
-                "license_no", text(b, "licenseNo"), "phone", optionalText(b, "phone"), "email", optionalText(b, "email"),
-                "hire_date", sqlDate(b, "hireDate"), "status", defaultText(b, "status", "ACTIVE"));
-        return created("driverId", insert("driver", "driver_id", values));
+    public Map<String, Object> createDriver(
+            @RequestBody Map<String, Object> b) {
+
+        Driver driver = new Driver(
+                longNumber(b, "managerId"),
+                text(b, "name"),
+                PasswordHasher.hash(text(b, "password")),
+                text(b, "nic"),
+                text(b, "licenseNo"),
+                optionalText(b, "phone"),
+                optionalText(b, "email"),
+                localDate(b, "hireDate"),
+                defaultText(b, "status", "ACTIVE")
+        );
+
+        Driver saved = driverService.createDriver(driver);
+
+        return created("driverId", saved.getDriverId());
     }
 
+    // =========================================================
+    // ROUTES
+    // =========================================================
+
     @GetMapping("/routes")
-    public List<Map<String, Object>> routes() {
-        return jdbc.queryForList("SELECT route_id AS \"routeId\", manager_id AS \"managerId\", route_name AS \"routeName\", start_location AS \"startLocation\", end_location AS \"endLocation\", distance_km AS \"distanceKm\", duration_time AS \"durationTime\", status FROM route ORDER BY route_id");
+    public List<Route> routes() {
+        return routeService.getAllRoutes();
     }
 
     @PostMapping("/routes")
-    public Map<String, Object> createRoute(@RequestBody Map<String, Object> b) {
-        Map<String, Object> values = row("manager_id", longNumber(b, "managerId"), "route_name", text(b, "routeName"),
-                "start_location", text(b, "startLocation"), "end_location", text(b, "endLocation"),
-                "distance_km", decimal(b, "distanceKm"), "duration_time", integer(b, "durationTime"),
-                "status", defaultText(b, "status", "ACTIVE"));
-        return created("routeId", insert("route", "route_id", values));
+    public Map<String, Object> createRoute(
+            @RequestBody Map<String, Object> b) {
+
+        Route route = new Route(
+                longNumber(b, "managerId"),
+                text(b, "routeName"),
+                text(b, "startLocation"),
+                text(b, "endLocation"),
+                decimal(b, "distanceKm"),
+                integer(b, "durationTime"),
+                defaultText(b, "status", "ACTIVE")
+        );
+
+        Route saved = routeService.createRoute(route);
+
+        return created("routeId", saved.getRouteId());
     }
 
+    // =========================================================
+    // PASSENGERS
+    // =========================================================
+
     @GetMapping("/passengers")
-    public List<Map<String, Object>> passengers() {
-        return jdbc.queryForList("SELECT passenger_id AS \"passengerId\", manager_id AS \"managerId\", name, nic, email, phone, passenger_type AS \"passengerType\", registered_date AS \"registeredDate\" FROM passenger ORDER BY passenger_id");
+    public List<Passenger> passengers() {
+        return passengerService.getAllPassengers();
     }
 
     @PostMapping("/passengers")
-    public Map<String, Object> createPassenger(@RequestBody Map<String, Object> b) {
-        Map<String, Object> values = row("manager_id", longNumber(b, "managerId"), "name", text(b, "name"),
-                "nic", optionalText(b, "nic"), "email", text(b, "email"), "password", PasswordHasher.hash(text(b, "password")),
-                "phone", optionalText(b, "phone"), "passenger_type", text(b, "passengerType"));
-        return created("passengerId", insert("passenger", "passenger_id", values));
+    public Map<String, Object> createPassenger(
+            @RequestBody Map<String, Object> b) {
+
+        Passenger passenger = new Passenger(
+                longNumber(b, "managerId"),
+                text(b, "name"),
+                optionalText(b, "nic"),
+                text(b, "email"),
+                PasswordHasher.hash(text(b, "password")),
+                optionalText(b, "phone"),
+                text(b, "passengerType")
+        );
+
+        Passenger saved = passengerService.createPassenger(passenger);
+
+        return created(
+                "passengerId",
+                saved.getPassengerId()
+        );
     }
 
+    // =========================================================
+    // TECHNICIANS
+    // =========================================================
+
     @GetMapping("/technicians")
-    public List<Map<String, Object>> technicians() {
-        return jdbc.queryForList("SELECT technician_id AS \"technicianId\", manager_id AS \"managerId\", name, phone, email, hire_date AS \"hireDate\", specialization FROM technician ORDER BY technician_id");
+    public List<Technician> technicians() {
+        return technicianService.getAllTechnicians();
     }
 
     @PostMapping("/technicians")
-    public Map<String, Object> createTechnician(@RequestBody Map<String, Object> b) {
-        Map<String, Object> values = row("manager_id", longNumber(b, "managerId"), "name", text(b, "name"),
-                "phone", optionalText(b, "phone"), "email", optionalText(b, "email"), "password", PasswordHasher.hash(text(b, "password")),
-                "hire_date", sqlDate(b, "hireDate"), "specialization", text(b, "specialization"));
-        return created("technicianId", insert("technician", "technician_id", values));
+    public Map<String, Object> createTechnician(
+            @RequestBody Map<String, Object> b) {
+
+        Technician technician = new Technician(
+                longNumber(b, "managerId"),
+                text(b, "name"),
+                optionalText(b, "phone"),
+                optionalText(b, "email"),
+                PasswordHasher.hash(text(b, "password")),
+                localDate(b, "hireDate"),
+                text(b, "specialization")
+        );
+
+        Technician saved =
+                technicianService.createTechnician(technician);
+
+        return created(
+                "technicianId",
+                saved.getTechnicianId()
+        );
     }
+
+    // =========================================================
+    // TRIPS - Existing JDBC implementation retained
+    // =========================================================
 
     @GetMapping("/trips")
     public List<Map<String, Object>> trips() {
-        return jdbc.queryForList("SELECT t.trip_id AS \"tripId\", t.trip_date AS \"tripDate\", t.departure_time AS \"departureTime\", t.arrival_time AS \"arrivalTime\", t.available_seats AS \"availableSeats\", t.status, t.route_id AS \"routeId\", r.route_name AS \"routeName\", t.vehicle_id AS \"vehicleId\", v.registration_no AS \"registrationNo\", t.driver_id AS \"driverId\", d.name AS \"driverName\" FROM trip t JOIN route r ON r.route_id=t.route_id JOIN vehicle v ON v.vehicle_id=t.vehicle_id JOIN driver d ON d.driver_id=t.driver_id ORDER BY t.trip_date, t.departure_time");
+        return jdbc.queryForList(
+                "SELECT t.trip_id AS \"tripId\", " +
+                        "t.trip_date AS \"tripDate\", " +
+                        "t.departure_time AS \"departureTime\", " +
+                        "t.arrival_time AS \"arrivalTime\", " +
+                        "t.available_seats AS \"availableSeats\", " +
+                        "t.status, t.route_id AS \"routeId\", " +
+                        "r.route_name AS \"routeName\", " +
+                        "t.vehicle_id AS \"vehicleId\", " +
+                        "v.registration_no AS \"registrationNo\", " +
+                        "t.driver_id AS \"driverId\", " +
+                        "d.name AS \"driverName\" " +
+                        "FROM trip t " +
+                        "JOIN route r ON r.route_id = t.route_id " +
+                        "JOIN vehicle v ON v.vehicle_id = t.vehicle_id " +
+                        "JOIN driver d ON d.driver_id = t.driver_id " +
+                        "ORDER BY t.trip_date, t.departure_time"
+        );
     }
 
     @PostMapping("/trips")
-    public Map<String, Object> createTrip(@RequestBody Map<String, Object> b) {
+    public Map<String, Object> createTrip(
+            @RequestBody Map<String, Object> b) {
+
         long vehicleId = longNumber(b, "vehicleId");
-        Integer capacity = jdbc.queryForObject("SELECT seat_capacity FROM vehicle WHERE vehicle_id = ?", Integer.class, vehicleId);
-        if (capacity == null) throw new IllegalArgumentException("Vehicle was not found");
-        int seats = b.containsKey("availableSeats") ? integer(b, "availableSeats") : capacity;
-        if (seats < 0 || seats > capacity) throw new IllegalArgumentException("availableSeats must be between 0 and the vehicle seat capacity");
-        Map<String, Object> values = row("departure_time", text(b, "departureTime"), "arrival_time", text(b, "arrivalTime"),
-                "trip_date", sqlDate(b, "tripDate"), "available_seats", seats, "status", defaultText(b, "status", "SCHEDULED"),
-                "route_id", longNumber(b, "routeId"), "vehicle_id", vehicleId, "driver_id", longNumber(b, "driverId"));
-        return created("tripId", insert("trip", "trip_id", values));
+
+        Integer capacity = jdbc.queryForObject(
+                "SELECT seat_capacity FROM vehicle WHERE vehicle_id = ?",
+                Integer.class,
+                vehicleId
+        );
+
+        if (capacity == null) {
+            throw new IllegalArgumentException(
+                    "Vehicle was not found");
+        }
+
+        int seats = b.containsKey("availableSeats")
+                ? integer(b, "availableSeats")
+                : capacity;
+
+        if (seats < 0 || seats > capacity) {
+            throw new IllegalArgumentException(
+                    "availableSeats must be between 0 and the vehicle seat capacity");
+        }
+
+        Map<String, Object> values = row(
+                "departure_time", text(b, "departureTime"),
+                "arrival_time", text(b, "arrivalTime"),
+                "trip_date", sqlDate(b, "tripDate"),
+                "available_seats", seats,
+                "status", defaultText(b, "status", "SCHEDULED"),
+                "route_id", longNumber(b, "routeId"),
+                "vehicle_id", vehicleId,
+                "driver_id", longNumber(b, "driverId")
+        );
+
+        return created(
+                "tripId",
+                insert("trip", "trip_id", values)
+        );
     }
+
+    // =========================================================
+    // BOOKINGS - Existing JDBC implementation retained
+    // =========================================================
 
     @GetMapping("/bookings")
     public List<Map<String, Object>> bookings() {
-        return jdbc.queryForList("SELECT b.booking_id AS \"bookingId\", b.seat_no AS \"seatNo\", b.booking_time AS \"bookingTime\", b.price, b.status, b.passenger_id AS \"passengerId\", p.name AS \"passengerName\", b.trip_id AS \"tripId\", r.route_name AS \"routeName\", t.trip_date AS \"tripDate\", t.departure_time AS \"departureTime\" FROM booking b JOIN passenger p ON p.passenger_id=b.passenger_id JOIN trip t ON t.trip_id=b.trip_id JOIN route r ON r.route_id=t.route_id ORDER BY b.booking_time DESC");
+        return jdbc.queryForList(
+                "SELECT b.booking_id AS \"bookingId\", " +
+                        "b.seat_no AS \"seatNo\", " +
+                        "b.booking_time AS \"bookingTime\", " +
+                        "b.price, b.status, " +
+                        "b.passenger_id AS \"passengerId\", " +
+                        "p.name AS \"passengerName\", " +
+                        "b.trip_id AS \"tripId\", " +
+                        "r.route_name AS \"routeName\", " +
+                        "t.trip_date AS \"tripDate\", " +
+                        "t.departure_time AS \"departureTime\" " +
+                        "FROM booking b " +
+                        "JOIN passenger p ON p.passenger_id = b.passenger_id " +
+                        "JOIN trip t ON t.trip_id = b.trip_id " +
+                        "JOIN route r ON r.route_id = t.route_id " +
+                        "ORDER BY b.booking_time DESC"
+        );
     }
 
     @PostMapping("/bookings")
-    public Map<String, Object> createBooking(@RequestBody Map<String, Object> b) {
-        String status = defaultText(b, "status", "PENDING").toUpperCase();
-        if (!List.of("PENDING", "CONFIRMED", "COMPLETED", "CANCELLED").contains(status)) throw new IllegalArgumentException("Invalid booking status");
-        Map<String, Object> values = row("seat_no", text(b, "seatNo"), "price", decimal(b, "price"), "status", status,
-                "passenger_id", longNumber(b, "passengerId"), "trip_id", longNumber(b, "tripId"));
-        // The Oracle trigger atomically checks and decrements available seats.
-        return created("bookingId", insert("booking", "booking_id", values));
+    public Map<String, Object> createBooking(
+            @RequestBody Map<String, Object> b) {
+
+        String status = defaultText(
+                b, "status", "PENDING").toUpperCase();
+
+        if (!List.of(
+                "PENDING", "CONFIRMED",
+                "COMPLETED", "CANCELLED"
+        ).contains(status)) {
+            throw new IllegalArgumentException(
+                    "Invalid booking status");
+        }
+
+        Map<String, Object> values = row(
+                "seat_no", text(b, "seatNo"),
+                "price", decimal(b, "price"),
+                "status", status,
+                "passenger_id", longNumber(b, "passengerId"),
+                "trip_id", longNumber(b, "tripId")
+        );
+
+        // Oracle trigger manages seat availability.
+        return created(
+                "bookingId",
+                insert("booking", "booking_id", values)
+        );
     }
 
     @PatchMapping("/bookings/{id}/status")
-    public Map<String, Object> updateBookingStatus(@PathVariable long id, @RequestBody Map<String, Object> b) {
+    public Map<String, Object> updateBookingStatus(
+            @PathVariable long id,
+            @RequestBody Map<String, Object> b) {
+
         String status = text(b, "status").toUpperCase();
-        if (!List.of("PENDING", "CONFIRMED", "COMPLETED", "CANCELLED").contains(status)) throw new IllegalArgumentException("Invalid booking status");
-        int count = jdbc.update("UPDATE booking SET status = ? WHERE booking_id = ?", status, id);
+
+        if (!List.of(
+                "PENDING", "CONFIRMED",
+                "COMPLETED", "CANCELLED"
+        ).contains(status)) {
+            throw new IllegalArgumentException(
+                    "Invalid booking status");
+        }
+
+        int count = jdbc.update(
+                "UPDATE booking SET status = ? WHERE booking_id = ?",
+                status, id);
+
         ensureUpdated(count, "Booking");
+
         return message("Booking status updated", "bookingId", id);
     }
 
+    // =========================================================
+    // PAYMENTS - Existing JDBC implementation retained
+    // =========================================================
+
     @GetMapping("/payments")
     public List<Map<String, Object>> payments() {
-        return jdbc.queryForList("SELECT p.payment_id AS \"paymentId\", p.booking_id AS \"bookingId\", p.manager_id AS \"managerId\", p.amount, p.payment_method AS \"paymentMethod\", p.payment_date AS \"paymentDate\", p.payment_status AS \"paymentStatus\", b.passenger_id AS \"passengerId\" FROM payment p JOIN booking b ON b.booking_id=p.booking_id ORDER BY p.payment_date DESC");
+        return jdbc.queryForList(
+                "SELECT p.payment_id AS \"paymentId\", " +
+                        "p.booking_id AS \"bookingId\", " +
+                        "p.manager_id AS \"managerId\", p.amount, " +
+                        "p.payment_method AS \"paymentMethod\", " +
+                        "p.payment_date AS \"paymentDate\", " +
+                        "p.payment_status AS \"paymentStatus\", " +
+                        "b.passenger_id AS \"passengerId\" " +
+                        "FROM payment p " +
+                        "JOIN booking b ON b.booking_id = p.booking_id " +
+                        "ORDER BY p.payment_date DESC"
+        );
     }
 
     @PostMapping("/payments")
-    public Map<String, Object> createPayment(@RequestBody Map<String, Object> b) {
-        String status = defaultText(b, "paymentStatus", "PENDING").toUpperCase();
-        if (!List.of("PENDING", "PAID", "FAILED", "REFUNDED").contains(status)) throw new IllegalArgumentException("Invalid payment status");
-        Map<String, Object> values = row("booking_id", longNumber(b, "bookingId"), "manager_id", longNumber(b, "managerId"),
-                "amount", decimal(b, "amount"), "payment_method", text(b, "paymentMethod"), "payment_status", status);
-        // UNIQUE(PAYMENT.BOOKING_ID) enforces the coursework's 1:1 Booking-Payment rule.
-        return created("paymentId", insert("payment", "payment_id", values));
+    public Map<String, Object> createPayment(
+            @RequestBody Map<String, Object> b) {
+
+        String status = defaultText(
+                b, "paymentStatus", "PENDING").toUpperCase();
+
+        if (!List.of(
+                "PENDING", "PAID", "FAILED", "REFUNDED"
+        ).contains(status)) {
+            throw new IllegalArgumentException(
+                    "Invalid payment status");
+        }
+
+        Map<String, Object> values = row(
+                "booking_id", longNumber(b, "bookingId"),
+                "manager_id", longNumber(b, "managerId"),
+                "amount", decimal(b, "amount"),
+                "payment_method", text(b, "paymentMethod"),
+                "payment_status", status
+        );
+
+        return created(
+                "paymentId",
+                insert("payment", "payment_id", values)
+        );
     }
+
+    // =========================================================
+    // MAINTENANCE - Existing JDBC implementation retained
+    // =========================================================
 
     @GetMapping("/maintenance")
     public List<Map<String, Object>> maintenance() {
-        return jdbc.queryForList("SELECT m.maintenance_id AS \"maintenanceId\", m.vehicle_id AS \"vehicleId\", v.registration_no AS \"registrationNo\", m.technician_id AS \"technicianId\", m.manager_id AS \"managerId\", m.maintenance_type AS \"maintenanceType\", m.description, m.service_date AS \"serviceDate\", m.cost, m.next_service_date AS \"nextServiceDate\", m.status FROM maintenance m JOIN vehicle v ON v.vehicle_id=m.vehicle_id ORDER BY m.service_date DESC");
+        return jdbc.queryForList(
+                "SELECT m.maintenance_id AS \"maintenanceId\", " +
+                        "m.vehicle_id AS \"vehicleId\", " +
+                        "v.registration_no AS \"registrationNo\", " +
+                        "m.technician_id AS \"technicianId\", " +
+                        "m.manager_id AS \"managerId\", " +
+                        "m.maintenance_type AS \"maintenanceType\", " +
+                        "m.description, m.service_date AS \"serviceDate\", " +
+                        "m.cost, m.next_service_date AS \"nextServiceDate\", " +
+                        "m.status " +
+                        "FROM maintenance m " +
+                        "JOIN vehicle v ON v.vehicle_id = m.vehicle_id " +
+                        "ORDER BY m.service_date DESC"
+        );
     }
 
     @PostMapping("/maintenance")
-    public Map<String, Object> createMaintenance(@RequestBody Map<String, Object> b) {
-        Map<String, Object> values = row("vehicle_id", longNumber(b, "vehicleId"), "technician_id", longNumber(b, "technicianId"),
-                "manager_id", longNumber(b, "managerId"), "maintenance_type", text(b, "maintenanceType"),
-                "description", optionalText(b, "description"), "service_date", sqlDate(b, "serviceDate"),
-                "cost", b.containsKey("cost") ? decimal(b, "cost") : BigDecimal.ZERO,
-                "next_service_date", optionalDate(b, "nextServiceDate"), "status", defaultText(b, "status", "SCHEDULED"));
-        return created("maintenanceId", insert("maintenance", "maintenance_id", values));
+    public Map<String, Object> createMaintenance(
+            @RequestBody Map<String, Object> b) {
+
+        Map<String, Object> values = row(
+                "vehicle_id", longNumber(b, "vehicleId"),
+                "technician_id", longNumber(b, "technicianId"),
+                "manager_id", longNumber(b, "managerId"),
+                "maintenance_type", text(b, "maintenanceType"),
+                "description", optionalText(b, "description"),
+                "service_date", sqlDate(b, "serviceDate"),
+                "cost", b.containsKey("cost")
+                        ? decimal(b, "cost") : BigDecimal.ZERO,
+                "next_service_date", optionalDate(b, "nextServiceDate"),
+                "status", defaultText(b, "status", "SCHEDULED")
+        );
+
+        return created(
+                "maintenanceId",
+                insert("maintenance", "maintenance_id", values)
+        );
     }
+
+    // =========================================================
+    // FEEDBACK - Existing JDBC implementation retained
+    // =========================================================
 
     @GetMapping("/feedback")
     public List<Map<String, Object>> feedback() {
-        return jdbc.queryForList("SELECT f.feedback_id AS \"feedbackId\", f.passenger_id AS \"passengerId\", p.name AS \"passengerName\", f.trip_id AS \"tripId\", r.route_name AS \"routeName\", f.manager_id AS \"managerId\", f.rating, f.description, f.feedback_date AS \"feedbackDate\" FROM feedback f JOIN passenger p ON p.passenger_id=f.passenger_id JOIN trip t ON t.trip_id=f.trip_id JOIN route r ON r.route_id=t.route_id ORDER BY f.feedback_date DESC");
+        return jdbc.queryForList(
+                "SELECT f.feedback_id AS \"feedbackId\", " +
+                        "f.passenger_id AS \"passengerId\", " +
+                        "p.name AS \"passengerName\", " +
+                        "f.trip_id AS \"tripId\", " +
+                        "r.route_name AS \"routeName\", " +
+                        "f.manager_id AS \"managerId\", " +
+                        "f.rating, f.description, " +
+                        "f.feedback_date AS \"feedbackDate\" " +
+                        "FROM feedback f " +
+                        "JOIN passenger p ON p.passenger_id = f.passenger_id " +
+                        "JOIN trip t ON t.trip_id = f.trip_id " +
+                        "JOIN route r ON r.route_id = t.route_id " +
+                        "ORDER BY f.feedback_date DESC"
+        );
     }
 
     @PostMapping("/feedback")
-    public Map<String, Object> createFeedback(@RequestBody Map<String, Object> b) {
+    public Map<String, Object> createFeedback(
+            @RequestBody Map<String, Object> b) {
+
         int rating = integer(b, "rating");
-        if (rating < 1 || rating > 5) throw new IllegalArgumentException("rating must be between 1 and 5");
-        Map<String, Object> values = row("passenger_id", longNumber(b, "passengerId"), "trip_id", longNumber(b, "tripId"),
-                "manager_id", longNumber(b, "managerId"), "rating", rating, "description", optionalText(b, "description"));
-        return created("feedbackId", insert("feedback", "feedback_id", values));
+
+        if (rating < 1 || rating > 5) {
+            throw new IllegalArgumentException(
+                    "rating must be between 1 and 5");
+        }
+
+        Map<String, Object> values = row(
+                "passenger_id", longNumber(b, "passengerId"),
+                "trip_id", longNumber(b, "tripId"),
+                "manager_id", longNumber(b, "managerId"),
+                "rating", rating,
+                "description", optionalText(b, "description")
+        );
+
+        return created(
+                "feedbackId",
+                insert("feedback", "feedback_id", values)
+        );
     }
 
-    private Number insert(String table, String idColumn, Map<String, Object> values) {
+    // =========================================================
+    // SHARED HELPERS
+    // =========================================================
+
+    private Number insert(
+            String table,
+            String idColumn,
+            Map<String, Object> values) {
+
         String[] columns = values.keySet().toArray(new String[0]);
-        return new SimpleJdbcInsert(dataSource).withTableName(table).usingColumns(columns)
-                .usingGeneratedKeyColumns(idColumn).executeAndReturnKey(new MapSqlParameterSource(values));
+
+        return new SimpleJdbcInsert(dataSource)
+                .withTableName(table)
+                .usingColumns(columns)
+                .usingGeneratedKeyColumns(idColumn)
+                .executeAndReturnKey(
+                        new MapSqlParameterSource(values));
     }
 
     private static Map<String, Object> row(Object... pairs) {
         Map<String, Object> result = new LinkedHashMap<>();
-        for (int i = 0; i < pairs.length; i += 2) result.put((String) pairs[i], pairs[i + 1]);
+
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put((String) pairs[i], pairs[i + 1]);
+        }
+
         return result;
     }
 
-    private static Map<String, Object> created(String idName, Number id) {
-        return row("message", "Created successfully", idName, id.longValue());
+    private static Map<String, Object> created(
+            String idName, Number id) {
+
+        return row(
+                "message", "Created successfully",
+                idName, id.longValue());
     }
 
-    private static Map<String, Object> message(String message, String idName, long id) {
-        return row("message", message, idName, id);
+    private static Map<String, Object> message(
+            String message, String idName, long id) {
+
+        return row(message == null ? "message" : "message",
+                message, idName, id);
     }
 
     private void ensureUpdated(int count, String entity) {
-        if (count == 0) throw new IllegalArgumentException(entity + " was not found");
+        if (count == 0) {
+            throw new IllegalArgumentException(
+                    entity + " was not found");
+        }
     }
 
-    private static String text(Map<String, Object> b, String key) {
+    private static String text(
+            Map<String, Object> b, String key) {
+
         Object value = b.get(key);
-        if (value == null || value.toString().isBlank()) throw new IllegalArgumentException(key + " is required");
+
+        if (value == null || value.toString().isBlank()) {
+            throw new IllegalArgumentException(
+                    key + " is required");
+        }
+
         return value.toString().trim();
     }
 
-    private static String optionalText(Map<String, Object> b, String key) {
+    private static String optionalText(
+            Map<String, Object> b, String key) {
+
         Object value = b.get(key);
-        return value == null || value.toString().isBlank() ? null : value.toString().trim();
+
+        return value == null || value.toString().isBlank()
+                ? null : value.toString().trim();
     }
 
-    private static String defaultText(Map<String, Object> b, String key, String fallback) {
+    private static String defaultText(
+            Map<String, Object> b,
+            String key,
+            String fallback) {
+
         String value = optionalText(b, key);
         return value == null ? fallback : value;
     }
 
-    private static long longNumber(Map<String, Object> b, String key) {
-        try { return Long.parseLong(text(b, key)); }
-        catch (NumberFormatException ex) { throw new IllegalArgumentException(key + " must be an integer"); }
+    private static long longNumber(
+            Map<String, Object> b, String key) {
+
+        try {
+            return Long.parseLong(text(b, key));
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    key + " must be an integer");
+        }
     }
 
-    private static int integer(Map<String, Object> b, String key) {
-        try { return Integer.parseInt(text(b, key)); }
-        catch (NumberFormatException ex) { throw new IllegalArgumentException(key + " must be an integer"); }
+    private static int integer(
+            Map<String, Object> b, String key) {
+
+        try {
+            return Integer.parseInt(text(b, key));
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    key + " must be an integer");
+        }
     }
 
-    private static Integer optionalInteger(Map<String, Object> b, String key) {
+    private static Integer optionalInteger(
+            Map<String, Object> b, String key) {
+
         String value = optionalText(b, key);
         if (value == null) return null;
-        try { return Integer.valueOf(value); }
-        catch (NumberFormatException ex) { throw new IllegalArgumentException(key + " must be an integer"); }
+
+        try {
+            return Integer.valueOf(value);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    key + " must be an integer");
+        }
     }
 
-    private static BigDecimal decimal(Map<String, Object> b, String key) {
-        try { return new BigDecimal(text(b, key)); }
-        catch (NumberFormatException ex) { throw new IllegalArgumentException(key + " must be numeric"); }
+    private static BigDecimal decimal(
+            Map<String, Object> b, String key) {
+
+        try {
+            return new BigDecimal(text(b, key));
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    key + " must be numeric");
+        }
     }
 
-    private static Date sqlDate(Map<String, Object> b, String key) {
-        try { return Date.valueOf(LocalDate.parse(text(b, key))); }
-        catch (RuntimeException ex) { throw new IllegalArgumentException(key + " must use YYYY-MM-DD format"); }
+    private static LocalDate localDate(
+            Map<String, Object> b, String key) {
+
+        try {
+            return LocalDate.parse(text(b, key));
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException(
+                    key + " must use YYYY-MM-DD format");
+        }
     }
 
-    private static Date optionalDate(Map<String, Object> b, String key) {
+    private static Date sqlDate(
+            Map<String, Object> b, String key) {
+
+        return Date.valueOf(localDate(b, key));
+    }
+
+    private static Date optionalDate(
+            Map<String, Object> b, String key) {
+
         String value = optionalText(b, key);
+
         if (value == null) return null;
-        try { return Date.valueOf(LocalDate.parse(value)); }
-        catch (RuntimeException ex) { throw new IllegalArgumentException(key + " must use YYYY-MM-DD format"); }
+
+        try {
+            return Date.valueOf(LocalDate.parse(value));
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException(
+                    key + " must use YYYY-MM-DD format");
+        }
     }
 }
