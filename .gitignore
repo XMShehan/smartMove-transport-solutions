@@ -16,3 +16,6 @@ node_modules/
 **/node_modules/
 dist/
 **/dist/
+
+# Local recovery backups
+backups/
