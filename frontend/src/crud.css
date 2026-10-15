@@ -1,0 +1,20 @@
+.crud-actions-heading { min-width: 150px; }
+.crud-actions-cell { min-width: 150px; }
+.crud-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.crud-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #dbe6ed; border-radius: 7px; padding: 6px 8px; background: #fff; font: inherit; font-size: 10px; font-weight: 750; cursor: pointer; transition: background .15s, border-color .15s; }
+.crud-action:hover:not(:disabled) { background: #f4f8fa; border-color: #b9cdd8; }
+.crud-action.edit { color: #087f7a; }
+.crud-action.delete { color: #b3444d; }
+.crud-action:disabled { opacity: .55; cursor: wait; }
+.crud-form-buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.crud-form-buttons .btn { margin-top: 0; width: auto; }
+.crud-form-buttons .btn.secondary { background: #fff; border: 1px solid #dce6ec; color: #446176; }
+.crud-form-note { margin: 8px 0 0; color: #8094a5; font-size: 10px; line-height: 1.6; }
+.plsql-report-output { border: 1px solid #dfe9ef; border-radius: 10px; background: #f8fbfc; padding: 15px; overflow: auto; }
+.plsql-report-output pre { margin: 0; color: #29475a; font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plsql-report-output p { margin: 12px 0 0; color: #718899; font-size: 10px; font-weight: 700; }
+@media (max-width: 720px) {
+  .crud-actions { flex-wrap: wrap; min-width: 130px; }
+  .crud-action { padding: 6px; }
+  .crud-form-buttons { flex-wrap: wrap; }
+}
