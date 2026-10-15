@@ -1,11 +1,18 @@
 package com.smartmove.backend.api;
 
 import java.math.BigDecimal;
+import java.sql.CallableStatement;
+import java.sql.Connection;
 import java.sql.Date;
+import java.sql.SQLException;
+import java.sql.Types;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import javax.sql.DataSource;
 
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -16,46 +23,119 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Report endpoints for the React dashboard. The PL/SQL procedures remain in Oracle for CW demonstration. */
+/** Exposes the coursework Oracle PL/SQL reports to the manager React workspace. */
 @RestController
 @RequestMapping("/api/reports")
-@CrossOrigin(origins = {"http://localhost:5173", "http://127.0.0.1:5173"}, allowCredentials = "true")
+@CrossOrigin(
+        origins = {"http://localhost:5173", "http://127.0.0.1:5173"},
+        allowCredentials = "true")
 public class ReportsApiController {
+    private static final int MAX_OUTPUT_LINES = 5000;
+
+    private final DataSource dataSource;
     private final JdbcTemplate jdbc;
 
-    public ReportsApiController(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public ReportsApiController(DataSource dataSource, JdbcTemplate jdbc) {
+        this.dataSource = dataSource;
+        this.jdbc = jdbc;
+    }
 
     @GetMapping("/most-booked-routes")
-    public List<Map<String, Object>> mostBookedRoutes() {
-        return jdbc.queryForList("SELECT r.route_id AS \"routeId\", r.route_name AS \"routeName\", COUNT(b.booking_id) AS \"bookingCount\" FROM route r JOIN trip t ON t.route_id=r.route_id JOIN booking b ON b.trip_id=t.trip_id WHERE b.status <> 'CANCELLED' GROUP BY r.route_id, r.route_name ORDER BY COUNT(b.booking_id) DESC, r.route_name");
+    public Map<String, Object> mostBookedRoutes() {
+        return runProcedure("Most-booked routes", "BEGIN PR_MOST_BOOKED_ROUTES; END;", statement -> {});
     }
 
     @GetMapping("/revenue")
     public Map<String, Object> revenue(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        if (endDate.isBefore(startDate)) throw new IllegalArgumentException("endDate must be on or after startDate");
-        BigDecimal total = jdbc.queryForObject("SELECT NVL(SUM(amount),0) FROM payment WHERE payment_status='PAID' AND payment_date >= ? AND payment_date < ?",
-                BigDecimal.class, Date.valueOf(startDate), Date.valueOf(endDate.plusDays(1)));
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("startDate", startDate.toString());
-        result.put("endDate", endDate.toString());
-        result.put("totalPaidRevenue", total == null ? BigDecimal.ZERO : total);
-        return result;
+        if (endDate.isBefore(startDate)) {
+            throw new IllegalArgumentException("End date must be on or after start date.");
+        }
+        return runProcedure("Revenue report", "BEGIN PR_REVENUE_REPORT(?, ?); END;", statement -> {
+            statement.setDate(1, Date.valueOf(startDate));
+            statement.setDate(2, Date.valueOf(endDate));
+        });
     }
 
     @GetMapping("/passenger-travel-history/{passengerId}")
-    public List<Map<String, Object>> passengerTravelHistory(@PathVariable long passengerId) {
-        return jdbc.queryForList("SELECT b.booking_id AS \"bookingId\", p.name AS \"passengerName\", r.route_name AS \"routeName\", t.trip_date AS \"tripDate\", t.departure_time AS \"departureTime\", t.arrival_time AS \"arrivalTime\", b.seat_no AS \"seatNo\", b.price, b.status FROM booking b JOIN passenger p ON p.passenger_id=b.passenger_id JOIN trip t ON t.trip_id=b.trip_id JOIN route r ON r.route_id=t.route_id WHERE p.passenger_id=? ORDER BY t.trip_date DESC, t.departure_time DESC", passengerId);
+    public Map<String, Object> passengerTravelHistory(@PathVariable long passengerId) {
+        if (passengerId < 1) throw new IllegalArgumentException("Passenger ID must be positive.");
+        return runProcedure("Passenger travel history", "BEGIN PR_PASSENGER_TRAVEL_HISTORY(?); END;",
+                statement -> statement.setLong(1, passengerId));
     }
 
     @GetMapping("/vehicles-due-maintenance")
-    public List<Map<String, Object>> vehiclesDueMaintenance() {
-        return jdbc.queryForList("SELECT m.maintenance_id AS \"maintenanceId\", v.vehicle_id AS \"vehicleId\", v.registration_no AS \"registrationNo\", v.vehicle_type AS \"vehicleType\", m.maintenance_type AS \"maintenanceType\", m.next_service_date AS \"nextServiceDate\", m.status FROM maintenance m JOIN vehicle v ON v.vehicle_id=m.vehicle_id WHERE m.next_service_date IS NOT NULL AND m.next_service_date <= TRUNC(SYSDATE) AND m.status <> 'COMPLETED' ORDER BY m.next_service_date");
+    public Map<String, Object> vehiclesDueMaintenance() {
+        return runProcedure("Vehicles due for maintenance", "BEGIN PR_VEHICLES_DUE_MAINTENANCE; END;", statement -> {});
     }
 
     @GetMapping("/trip-occupancy")
-    public List<Map<String, Object>> tripOccupancy() {
-        return jdbc.queryForList("SELECT t.trip_id AS \"tripId\", r.route_name AS \"routeName\", t.trip_date AS \"tripDate\", t.departure_time AS \"departureTime\", v.registration_no AS \"registrationNo\", v.seat_capacity AS \"seatCapacity\", COUNT(b.booking_id) AS \"bookedSeats\", ROUND(COUNT(b.booking_id)*100/v.seat_capacity,1) AS \"occupancyPercent\" FROM trip t JOIN route r ON r.route_id=t.route_id JOIN vehicle v ON v.vehicle_id=t.vehicle_id LEFT JOIN booking b ON b.trip_id=t.trip_id AND b.status IN ('CONFIRMED','COMPLETED') GROUP BY t.trip_id,r.route_name,t.trip_date,t.departure_time,v.registration_no,v.seat_capacity ORDER BY t.trip_date,t.departure_time");
+    public Map<String, Object> tripOccupancy() {
+        return runProcedure("Trip occupancy", "BEGIN PR_TRIP_OCCUPANCY_REPORT; END;", statement -> {});
+    }
+
+    @GetMapping("/passenger-total-paid/{passengerId}")
+    public Map<String, Object> passengerTotalPaid(@PathVariable long passengerId) {
+        if (passengerId < 1) throw new IllegalArgumentException("Passenger ID must be positive.");
+        BigDecimal total = jdbc.queryForObject(
+                "SELECT FN_PASSENGER_TOTAL_PAID(?) FROM dual", BigDecimal.class, passengerId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("passengerId", passengerId);
+        result.put("totalPaidLkr", total == null ? BigDecimal.ZERO : total);
+        result.put("source", "FN_PASSENGER_TOTAL_PAID");
+        return result;
+    }
+
+    private Map<String, Object> runProcedure(String title, String plsqlBlock, Binder binder) {
+        List<String> lines = new ArrayList<>();
+        try (Connection connection = dataSource.getConnection()) {
+            boolean outputEnabled = false;
+            try {
+                try (CallableStatement enable = connection.prepareCall("BEGIN DBMS_OUTPUT.ENABLE(NULL); END;")) {
+                    enable.execute();
+                    outputEnabled = true;
+                }
+
+                try (CallableStatement procedure = connection.prepareCall(plsqlBlock)) {
+                    binder.bind(procedure);
+                    procedure.execute();
+                }
+
+                try (CallableStatement getLine = connection.prepareCall("BEGIN DBMS_OUTPUT.GET_LINE(?, ?); END;")) {
+                    getLine.registerOutParameter(1, Types.VARCHAR);
+                    getLine.registerOutParameter(2, Types.INTEGER);
+                    while (lines.size() < MAX_OUTPUT_LINES) {
+                        getLine.execute();
+                        if (getLine.getInt(2) != 0) break;
+                        String line = getLine.getString(1);
+                        lines.add(line == null ? "" : line);
+                    }
+                }
+            } finally {
+                if (outputEnabled) {
+                    try (CallableStatement disable = connection.prepareCall("BEGIN DBMS_OUTPUT.DISABLE; END;")) {
+                        disable.execute();
+                    } catch (SQLException ignored) {
+                        // Do not mask a report result/error if cleanup of DBMS_OUTPUT fails.
+                    }
+                }
+            }
+        } catch (SQLException ex) {
+            throw new IllegalStateException(
+                    "Could not execute the Oracle report procedure. Confirm the PL/SQL object is compiled and enabled.", ex);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("title", title);
+        result.put("source", "Oracle PL/SQL");
+        result.put("lines", lines);
+        if (lines.size() == MAX_OUTPUT_LINES) result.put("truncated", true);
+        return result;
+    }
+
+    @FunctionalInterface
+    private interface Binder {
+        void bind(CallableStatement statement) throws SQLException;
     }
 }
